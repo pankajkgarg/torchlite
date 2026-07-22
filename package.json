@@ -1,7 +1,7 @@
 {
   "name": "torchlite-browser-tests",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser tests for TorchLite's JupyterLite/Pyodide notebooks",
   "scripts": {
     "test:browser": "playwright test tests/jupyterlite-notebooks.spec.js --reporter=line"

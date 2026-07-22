@@ -37,7 +37,7 @@ has completed in the browser.
 | MLP + BatchNorm | Browser slice passing | Original plots and long schedules |
 | Manual backprop | Local parity fixture passing | Editable browser notebook |
 | WaveNet | Browser slice passing | Original long schedule as opt-in benchmark |
-| GPT | Not yet supported | LayerNorm, masks/`tril`, initialization, buffers, optimizer/state APIs, WebGPU |
+| GPT | Reduced one-block decoder trains in browser | Broader nanoGPT surface, tokenizer, checkpoints, and WebGPU |
 | Tokenizer | Mostly pure Python | Package `regex`/tiktoken-compatible paths and browser files |
 
 ## Performance contract
@@ -56,5 +56,6 @@ has completed in the browser.
 PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_original_bigram.py
 PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_manual_backprop.py
 PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_wavenet.py
+PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_llm_core.py
 npm run test:browser
 ```
