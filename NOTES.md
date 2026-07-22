@@ -11,7 +11,7 @@
 Run PyTorch-style educational notebooks locally in the browser using JupyterLite, Pyodide, and a compact compatibility package.
 
 ## Current status
-2026-07-22: TorchLite 0.2's `llm-core-v1` milestone is published on `agent/llm-core-v1` in draft PR #1 against `main`; the one-block, 1,112-parameter transformer finishes at loss 1.291235 versus PyTorch 2.13's 1.291306, six local regressions, the wheel, JupyterLite checks, and all four Chrome/Pyodide notebooks pass (1.2m), while broader nanoGPT, checkpoints/tokenizers, CI/static preview, and true WebGPU execution remain open.
+2026-07-22: TorchLite 0.2's `llm-core-v1` milestone is merged to `main` as `97d6424` through PR #1; the one-block, 1,112-parameter transformer finishes at loss 1.291235 versus PyTorch 2.13's 1.291306, six local regressions, the wheel, JupyterLite checks, and all four Chrome/Pyodide notebooks pass (1.2m), while broader nanoGPT, checkpoints/tokenizers, CI/static preview, and true WebGPU execution remain open.
 
 ## Architecture
 - Decision: JupyterLite owns the application, notebook, persistence, and output layers; TorchLite owns the top-level `torch` compatibility package and future WebGPU extension.

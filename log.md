@@ -36,3 +36,6 @@ Completed a fresh GitHub device flow while keeping the CLI session alive; `gh` c
 
 ## [2026-07-22 16:20] status | Validated feature branch published
 Committed `f1bd597`, pushed `agent/llm-core-v1`, and opened draft PR #1 against `main`: https://github.com/pankajkgarg/torchlite/pull/1.
+
+## [2026-07-22 16:31] status | LLM-core merged to main
+Marked PR #1 ready and squash-merged it as `97d6424`; the ColdStore checkout was fast-forwarded to the new `origin/main`.
