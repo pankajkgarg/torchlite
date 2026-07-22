@@ -12,7 +12,7 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 float32 = np.dtype("float32")
 float64 = np.dtype("float64")
@@ -296,6 +296,59 @@ class Tensor:
             result._backward = lambda: self._accumulate_grad(np.swapaxes(result.grad._array, dim0, dim1))
         return result
 
+    def permute(self, *dims: int | Sequence[int]) -> "Tensor":
+        if len(dims) == 1 and isinstance(dims[0], (tuple, list)):
+            dims = tuple(dims[0])
+        normalized = tuple(builtins_int(dim) % self.ndim for dim in dims)
+        if sorted(normalized) != list(range(self.ndim)):
+            raise RuntimeError("permute expects each dimension exactly once")
+        result = self._new(np.transpose(self._array, normalized), self, op="PermuteBackward")
+        if result.requires_grad:
+            inverse = tuple(np.argsort(normalized))
+            result._backward = lambda: self._accumulate_grad(
+                np.transpose(result.grad._array, inverse)
+            )
+        return result
+
+    def contiguous(self) -> "Tensor":
+        return self.clone()
+
+    def flatten(self, start_dim: int = 0, end_dim: int = -1) -> "Tensor":
+        start_dim %= self.ndim
+        end_dim %= self.ndim
+        if start_dim > end_dim:
+            raise RuntimeError("flatten start_dim cannot come after end_dim")
+        collapsed = builtins_int(np.prod(self.shape[start_dim:end_dim + 1]))
+        return self.view(self.shape[:start_dim] + (collapsed,) + self.shape[end_dim + 1:])
+
+    def split(self, split_size_or_sections: int | Sequence[int], dim: int = 0) -> tuple["Tensor", ...]:
+        axis = dim % self.ndim
+        length = self.shape[axis]
+        if isinstance(split_size_or_sections, builtins_int):
+            size = builtins_int(split_size_or_sections)
+            if size <= 0:
+                raise RuntimeError("split_size must be greater than zero")
+            sections = [min(size, length - start) for start in range(0, length, size)]
+        else:
+            sections = [builtins_int(section) for section in split_size_or_sections]
+            if sum(sections) != length:
+                raise RuntimeError("split_with_sizes expects sections to sum to the dimension length")
+        output = []
+        start = 0
+        for section in sections:
+            key = [slice(None)] * self.ndim
+            key[axis] = slice(start, start + section)
+            output.append(self[tuple(key)])
+            start += section
+        return tuple(output)
+
+    def chunk(self, chunks: int, dim: int = 0) -> tuple["Tensor", ...]:
+        chunks = builtins_int(chunks)
+        if chunks <= 0:
+            raise RuntimeError("chunks must be greater than zero")
+        length = self.shape[dim % self.ndim]
+        return self.split(max(1, (length + chunks - 1) // chunks), dim=dim)
+
     def t(self) -> "Tensor":
         if self.ndim != 2:
             raise RuntimeError("t() expects a 2D tensor")
@@ -343,6 +396,23 @@ class Tensor:
 
         converted = tuple(convert(part) for part in key) if isinstance(key, tuple) else convert(key)
         self._array[converted] = _as_array(value)
+
+    def masked_fill(self, mask: "Tensor", value: Any) -> "Tensor":
+        mask_array = np.asarray(_as_array(mask), dtype=np.bool_)
+        result = self._new(
+            np.where(mask_array, _as_array(value), self._array),
+            self,
+            op="MaskedFillBackward",
+        )
+        if result.requires_grad:
+            result._backward = lambda: self._accumulate_grad(
+                _sum_to_shape(np.where(mask_array, 0, result.grad._array), self.shape)
+            )
+        return result
+
+    def copy_(self, source: Any) -> "Tensor":
+        self._array[...] = _as_array(source)
+        return self
 
     def __add__(self, other: Any) -> "Tensor":
         other_array = _as_array(other)
@@ -570,6 +640,18 @@ class Tensor:
             result._backward = lambda: self._accumulate_grad(result.grad._array * (1 - values ** 2))
         return result
 
+    def softmax(self, dim: int = -1) -> "Tensor":
+        return nn.functional.softmax(self, dim=dim)
+
+    def log_softmax(self, dim: int = -1) -> "Tensor":
+        return nn.functional.log_softmax(self, dim=dim)
+
+    def argmax(self, dim: int | None = None, keepdim: bool = False) -> "Tensor":
+        values = np.argmax(self._array, axis=dim)
+        if dim is not None and keepdim:
+            values = np.expand_dims(values, axis=dim)
+        return Tensor(values, dtype=int64, device=self.device)
+
 
 class _GradContext(ContextDecorator):
     def __init__(self, enabled: bool):
@@ -625,12 +707,44 @@ def ones(*shape: Any, dtype: Any = float32, device: Any = "cpu", requires_grad: 
     return Tensor(np.ones(_shape_args(shape), dtype=dtype), device=device, requires_grad=requires_grad)
 
 
+def empty(*shape: Any, dtype: Any = float32, device: Any = "cpu", requires_grad: bool = False) -> Tensor:
+    return Tensor(np.empty(_shape_args(shape), dtype=dtype), device=device, requires_grad=requires_grad)
+
+
+def full(
+    shape: Sequence[int],
+    fill_value: Any,
+    *,
+    dtype: Any | None = None,
+    device: Any = "cpu",
+    requires_grad: bool = False,
+) -> Tensor:
+    return Tensor(
+        np.full(tuple(shape), fill_value, dtype=dtype or _resolve_dtype(fill_value, None)),
+        device=device,
+        requires_grad=requires_grad,
+    )
+
+
 def zeros_like(input: Tensor, **kwargs) -> Tensor:
     return Tensor(np.zeros_like(input._array), dtype=kwargs.get("dtype", input.dtype), device=kwargs.get("device", input.device))
 
 
 def ones_like(input: Tensor, **kwargs) -> Tensor:
     return Tensor(np.ones_like(input._array), dtype=kwargs.get("dtype", input.dtype), device=kwargs.get("device", input.device))
+
+
+def empty_like(input: Tensor, **kwargs) -> Tensor:
+    return Tensor(np.empty_like(input._array), dtype=kwargs.get("dtype", input.dtype), device=kwargs.get("device", input.device))
+
+
+def full_like(input: Tensor, fill_value: Any, **kwargs) -> Tensor:
+    dtype = kwargs.get("dtype", input.dtype)
+    return Tensor(
+        np.full(input.shape, fill_value, dtype=dtype),
+        dtype=dtype,
+        device=kwargs.get("device", input.device),
+    )
 
 
 def _rng(generator: Generator | None):
@@ -693,11 +807,59 @@ def multinomial(input: Tensor, num_samples: int, replacement: bool = False, *, g
 
 
 def stack(tensors: Sequence[Tensor], dim: int = 0) -> Tensor:
-    return Tensor(np.stack([value._array for value in tensors], axis=dim))
+    tensors = tuple(tensors)
+    requires_grad = _grad_enabled and any(value.requires_grad for value in tensors)
+    result = Tensor(
+        np.stack([value._array for value in tensors], axis=dim),
+        dtype=tensors[0].dtype,
+        device=tensors[0].device,
+        requires_grad=requires_grad,
+        _children=tensors if requires_grad else (),
+        _op="StackBackward",
+    )
+    if result.requires_grad:
+        def backward_stack() -> None:
+            for index, value in enumerate(tensors):
+                if value.requires_grad:
+                    value._accumulate_grad(np.take(result.grad._array, index, axis=dim))
+        result._backward = backward_stack
+    return result
 
 
 def cat(tensors: Sequence[Tensor], dim: int = 0) -> Tensor:
-    return Tensor(np.concatenate([value._array for value in tensors], axis=dim))
+    tensors = tuple(tensors)
+    axis = dim % tensors[0].ndim
+    requires_grad = _grad_enabled and any(value.requires_grad for value in tensors)
+    result = Tensor(
+        np.concatenate([value._array for value in tensors], axis=axis),
+        dtype=tensors[0].dtype,
+        device=tensors[0].device,
+        requires_grad=requires_grad,
+        _children=tensors if requires_grad else (),
+        _op="CatBackward",
+    )
+    if result.requires_grad:
+        boundaries = np.cumsum([value.shape[axis] for value in tensors[:-1]])
+        def backward_cat() -> None:
+            gradients = np.split(result.grad._array, boundaries, axis=axis)
+            for value, gradient in zip(tensors, gradients):
+                if value.requires_grad:
+                    value._accumulate_grad(gradient)
+        result._backward = backward_cat
+    return result
+
+
+def split(input: Tensor, split_size_or_sections: int | Sequence[int], dim: int = 0):
+    return input.split(split_size_or_sections, dim=dim)
+
+
+def chunk(input: Tensor, chunks: int, dim: int = 0):
+    return input.chunk(chunks, dim=dim)
+
+
+def tril(input: Tensor, diagonal: int = 0) -> Tensor:
+    mask = np.tril(np.ones(input.shape, dtype=np.bool_), k=diagonal)
+    return input.masked_fill(Tensor(~mask, dtype=bool), 0)
 
 
 def log(input: Tensor) -> Tensor:
@@ -710,6 +872,14 @@ def exp(input: Tensor) -> Tensor:
 
 def tanh(input: Tensor) -> Tensor:
     return input.tanh()
+
+
+def softmax(input: Tensor, dim: int = -1) -> Tensor:
+    return nn.functional.softmax(input, dim=dim)
+
+
+def argmax(input: Tensor, dim: int | None = None, keepdim: bool = False) -> Tensor:
+    return input.argmax(dim=dim, keepdim=keepdim)
 
 
 def sqrt(input: Tensor) -> Tensor:
@@ -769,3 +939,4 @@ builtins_float = __builtins__["float"] if isinstance(__builtins__, dict) else __
 builtins_bool = __builtins__["bool"] if isinstance(__builtins__, dict) else __builtins__.bool
 
 from . import nn  # noqa: E402  (registered after Tensor is defined)
+from . import optim  # noqa: E402

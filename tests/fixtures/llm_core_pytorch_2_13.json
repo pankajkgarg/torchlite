@@ -1,0 +1,16 @@
+{
+  "source": "tests/test_llm_core.py executed with PyTorch 2.13.0 on CPU",
+  "date": "2026-07-22",
+  "steps": 24,
+  "metrics": {
+    "initial_loss": 2.4007680416107178,
+    "last_step_loss": 1.3762511014938354,
+    "final_loss": 1.2913060188293457,
+    "logit_checksum": -4.932621955871582,
+    "parameter_count": 1112
+  },
+  "tolerances": {
+    "loss_atol": 0.0001,
+    "logit_checksum_atol": 0.001
+  }
+}

@@ -11,6 +11,7 @@ Hero*. The repository currently includes browser-tested notebooks for:
 - the full 32,033-name makemore bigram dataset;
 - MLP training and BatchNorm gradients;
 - a hierarchical, WaveNet-shaped model.
+- a one-block decoder-only transformer with causal attention and AdamW.
 
 This is not a complete PyTorch implementation. It is an intentionally small
 compatibility layer for educational workloads, with executable tests defining
@@ -37,7 +38,7 @@ temp/jupyterlite-venv/bin/python -m build --wheel --no-isolation
 temp/jupyterlite-venv/bin/jupyter lite build \
   --lite-dir jupyterlite \
   --contents content \
-  --piplite-wheels ../dist/torchlite-0.1.0-py3-none-any.whl
+  --piplite-wheels ../dist/torchlite-0.2.0-py3-none-any.whl
 temp/jupyterlite-venv/bin/jupyter lite serve --lite-dir jupyterlite
 ```
 
@@ -51,11 +52,12 @@ PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_original_bigram.py
 PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_mlp_batchnorm.py
 PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_manual_backprop.py
 PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_wavenet.py
+PYTHONPATH=src temp/jupyterlite-venv/bin/python tests/test_llm_core.py
 temp/jupyterlite-venv/bin/jupyter lite check --lite-dir jupyterlite
 npm run test:browser
 ```
 
-See [the roadmap](docs/IMPLEMENTATION_ROADMAP.md) for GPT and WebGPU work.
+See the executable [`llm-core-v1` profile](docs/LLM_CORE_V1.md) and [roadmap](docs/IMPLEMENTATION_ROADMAP.md) for broader GPT and WebGPU work.
 
 ## Attribution
 
