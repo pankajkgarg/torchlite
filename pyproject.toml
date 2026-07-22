@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "torchlite"
+version = "0.1.0"
+description = "A course-focused PyTorch compatibility layer for Pyodide and JupyterLite"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Pankaj Garg" }]
+keywords = ["jupyterlite", "pyodide", "pytorch", "browser", "machine-learning"]
+dependencies = ["numpy>=1.26"]
+
+[project.urls]
+Repository = "https://github.com/pankajkgarg/torchlite"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/torch"]
