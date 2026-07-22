@@ -11,7 +11,7 @@
 Run PyTorch-style educational notebooks locally in the browser using JupyterLite, Pyodide, and a compact compatibility package.
 
 ## Current status
-2026-07-22: TorchLite is validated as an independent build: the `torchlite-0.1.0` wheel, five numerical regressions, JupyterLite integrity checks, and three Chrome/Pyodide notebooks pass from a clean ColdStore-local environment in 1.2m; the repository is ready for its fresh GitHub history, while GPT APIs and true WebGPU execution remain future milestones.
+2026-07-22: TorchLite is published at `pankajkgarg/torchlite` as a public, independent, non-fork repository on `main`; the `torchlite-0.1.0` wheel, five numerical regressions, JupyterLite integrity checks, and three Chrome/Pyodide notebooks pass from its clean ColdStore-local environment in 1.2m, while GPT APIs and true WebGPU execution remain future milestones.
 
 ## Architecture
 - Decision: JupyterLite owns the application, notebook, persistence, and output layers; TorchLite owns the top-level `torch` compatibility package and future WebGPU extension.
