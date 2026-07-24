@@ -10,6 +10,8 @@ Included notebooks:
 2. `02-makemore-mlp-batchnorm.ipynb` — editable MLP and BatchNorm slice.
 3. `03-makemore-wavenet.ipynb` — hierarchical WaveNet-shaped network.
 4. `04-tiny-gpt.ipynb` — one-block causal transformer with AdamW.
+5. `05-source-lesson-compat.ipynb` — APIs used by the original lesson and
+   exercise notebooks, including CPU-safe device checks and checkpoint I/O.
 
 Build from the repository root:
 
@@ -18,7 +20,7 @@ temp/jupyterlite-venv/bin/python -m build --wheel --no-isolation
 temp/jupyterlite-venv/bin/jupyter lite build \
   --lite-dir jupyterlite \
   --contents content \
-  --piplite-wheels ../dist/torchlite-0.2.0-py3-none-any.whl
+  --piplite-wheels ../dist/torchlite-0.3.0-py3-none-any.whl
 ```
 
 Validate and test:
