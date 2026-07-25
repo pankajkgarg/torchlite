@@ -27,6 +27,60 @@ class Optimizer:
                 elif parameter.grad is not None:
                     parameter.grad._array.fill(0)
 
+    def state_dict(self):
+        return {
+            "state": self.state,
+            "param_groups": [
+                {key: value for key, value in group.items() if key != "params"}
+                for group in self.param_groups
+            ],
+        }
+
+
+class SGD(Optimizer):
+    def __init__(
+        self,
+        params,
+        lr: float = 1e-3,
+        momentum: float = 0.0,
+        dampening: float = 0.0,
+        weight_decay: float = 0.0,
+        nesterov: bool = False,
+        **kwargs,
+    ):
+        del kwargs
+        if lr < 0 or momentum < 0 or weight_decay < 0:
+            raise ValueError("invalid SGD hyperparameters")
+        if nesterov and (momentum <= 0 or dampening != 0):
+            raise ValueError("Nesterov momentum requires momentum and zero dampening")
+        super().__init__(params, {
+            "lr": lr,
+            "momentum": momentum,
+            "dampening": dampening,
+            "weight_decay": weight_decay,
+            "nesterov": nesterov,
+        })
+
+    def step(self, closure=None):
+        loss = closure() if closure is not None else None
+        for group in self.param_groups:
+            for parameter in group["params"]:
+                if parameter.grad is None:
+                    continue
+                gradient = parameter.grad._array
+                if group["weight_decay"]:
+                    gradient = gradient + group["weight_decay"] * parameter._array
+                if group["momentum"]:
+                    state = self.state.setdefault(
+                        id(parameter), {"momentum_buffer": np.zeros_like(parameter._array)}
+                    )
+                    buffer = state["momentum_buffer"]
+                    buffer *= group["momentum"]
+                    buffer += (1 - group["dampening"]) * gradient
+                    gradient = gradient + group["momentum"] * buffer if group["nesterov"] else buffer
+                parameter._array -= group["lr"] * gradient
+        return loss
+
 
 class AdamW(Optimizer):
     def __init__(
@@ -72,3 +126,6 @@ class AdamW(Optimizer):
                     parameter._array *= 1 - group["lr"] * group["weight_decay"]
                 parameter._array -= group["lr"] * (state["exp_avg"] / correction1) / denominator
         return loss
+
+
+from . import lr_scheduler  # noqa: E402

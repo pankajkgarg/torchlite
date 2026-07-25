@@ -49,6 +49,12 @@ def gelu(input: Tensor, approximate: str = "none") -> Tensor:
     return result
 
 
+def relu(input: Tensor, inplace: bool = False) -> Tensor:
+    if inplace:
+        raise NotImplementedError("TorchLite relu does not support inplace=True")
+    return input * (input > 0).to(dtype=input.dtype)
+
+
 def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     if inplace:
         raise NotImplementedError("TorchLite dropout does not support inplace=True")

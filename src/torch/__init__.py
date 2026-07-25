@@ -8,14 +8,17 @@ from __future__ import annotations
 
 from collections import namedtuple
 from contextlib import ContextDecorator
+import pickle
 from typing import Any, Iterable, Sequence
 
 import numpy as np
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 float32 = np.dtype("float32")
 float64 = np.dtype("float64")
+float16 = np.dtype("float16")
+half = float16
 double = float64
 float = float32
 int32 = np.dtype("int32")
@@ -28,6 +31,7 @@ uint8 = np.dtype("uint8")
 _grad_enabled = True
 _default_rng = np.random.RandomState()
 MaxResult = namedtuple("max", ["values", "indices"])
+TopKResult = namedtuple("topk", ["values", "indices"])
 
 
 def _resolve_dtype(data: Any, dtype: Any | None) -> np.dtype:
@@ -159,8 +163,28 @@ class Tensor:
     def __int__(self) -> builtins_int:
         return builtins_int(self.item())
 
+    def __bool__(self) -> bool:
+        if self.numel() != 1:
+            raise RuntimeError("Boolean value of Tensor with more than one value is ambiguous")
+        return builtins_bool(self.item())
+
+    def __getstate__(self):
+        return {
+            "array": self._array,
+            "device": str(self.device),
+            "requires_grad": self.requires_grad,
+        }
+
+    def __setstate__(self, state):
+        self.__init__(
+            state["array"],
+            dtype=state["array"].dtype,
+            device=state["device"],
+            requires_grad=state["requires_grad"],
+        )
+
     def _new(self, data: Any, *parents: "Tensor", op: str = "") -> "Tensor":
-        requires_grad = _grad_enabled and any(parent.requires_grad for parent in parents)
+        requires_grad = _grad_enabled and builtins_any(parent.requires_grad for parent in parents)
         return Tensor(
             data,
             dtype=np.asarray(data).dtype,
@@ -414,6 +438,25 @@ class Tensor:
         self._array[...] = _as_array(source)
         return self
 
+    def add_(self, other: Any, *, alpha: float = 1) -> "Tensor":
+        self._array[...] += alpha * _as_array(other)
+        return self
+
+    def uniform_(
+        self,
+        from_: float = 0.0,
+        to: float = 1.0,
+        *,
+        generator: "Generator | None" = None,
+    ) -> "Tensor":
+        self._array[...] = _rng(generator).uniform(from_, to, self.shape).astype(self.dtype)
+        return self
+
+    def bernoulli_(self, p: float = 0.5, *, generator: "Generator | None" = None) -> "Tensor":
+        probabilities = np.full(self.shape, p, dtype=np.float64)
+        self._array[...] = _rng(generator).binomial(1, probabilities).astype(self.dtype)
+        return self
+
     def __add__(self, other: Any) -> "Tensor":
         other_array = _as_array(other)
         parents = (self, other) if isinstance(other, Tensor) else (self,)
@@ -598,6 +641,103 @@ class Tensor:
                 result.grad._array * np.sign(self._array)
             )
         return result
+
+    def round(self, decimals: int = 0) -> "Tensor":
+        return Tensor(np.round(self._array, decimals=decimals), dtype=self.dtype, device=self.device)
+
+    def flip(self, dims: Sequence[int]) -> "Tensor":
+        axes = tuple(builtins_int(dim) % self.ndim for dim in dims)
+        result = self._new(np.flip(self._array, axis=axes), self, op="FlipBackward")
+        if result.requires_grad:
+            result._backward = lambda: self._accumulate_grad(
+                np.flip(result.grad._array, axis=axes)
+            )
+        return result
+
+    def repeat(self, *sizes: int | Sequence[int]) -> "Tensor":
+        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
+            sizes = tuple(sizes[0])
+        repeats = tuple(builtins_int(size) for size in sizes)
+        if len(repeats) < self.ndim:
+            raise RuntimeError("Number of dimensions of repeat dims can not be smaller than tensor")
+        padded_shape = (1,) * (len(repeats) - self.ndim) + self.shape
+        values = np.tile(self._array.reshape(padded_shape), repeats)
+        result = self._new(values, self, op="RepeatBackward")
+        if result.requires_grad:
+            def backward_repeat() -> None:
+                grad = result.grad._array
+                interleaved = []
+                for repeat, size in zip(repeats, padded_shape):
+                    interleaved.extend((repeat, size))
+                grad = grad.reshape(interleaved)
+                repeat_axes = tuple(range(0, 2 * len(repeats), 2))
+                grad = grad.sum(axis=repeat_axes).reshape(padded_shape)
+                self._accumulate_grad(grad.reshape(self.shape))
+            result._backward = backward_repeat
+        return result
+
+    def gather(self, dim: int, index: "Tensor") -> "Tensor":
+        axis = dim % self.ndim
+        indices = np.asarray(index._array, dtype=np.int64)
+        values = np.take_along_axis(self._array, indices, axis=axis)
+        result = self._new(values, self, op="GatherBackward")
+        if result.requires_grad:
+            def backward_gather() -> None:
+                gradient = np.zeros_like(self._array)
+                coordinates = np.indices(indices.shape)
+                coordinates[axis] = indices
+                np.add.at(gradient, tuple(coordinates), result.grad._array)
+                self._accumulate_grad(gradient)
+            result._backward = backward_gather
+        return result
+
+    def scatter(self, dim: int, index: "Tensor", src: Any) -> "Tensor":
+        if self.requires_grad or (isinstance(src, Tensor) and src.requires_grad):
+            raise NotImplementedError(
+                "TorchLite scatter autograd is outside the Zero-to-Hero compatibility profile"
+            )
+        axis = dim % self.ndim
+        indices = np.asarray(index._array, dtype=np.int64)
+        output = self.clone()
+        source = _as_array(src)
+        if np.asarray(source).ndim == 0:
+            np.put_along_axis(
+                output._array,
+                indices,
+                np.full(indices.shape, source, dtype=output.dtype),
+                axis=axis,
+            )
+        else:
+            np.put_along_axis(output._array, indices, np.broadcast_to(source, indices.shape), axis=axis)
+        # The Zero-to-Hero use is metric construction. Gradient through src is
+        # deliberately outside this course-focused profile.
+        return output
+
+    def isinf(self) -> "Tensor":
+        return Tensor(np.isinf(self._array), dtype=bool, device=self.device)
+
+    def isnan(self) -> "Tensor":
+        return Tensor(np.isnan(self._array), dtype=bool, device=self.device)
+
+    def any(self, dim: int | None = None, keepdim: bool = False) -> "Tensor":
+        return Tensor(
+            np.any(self._array, axis=dim, keepdims=keepdim),
+            dtype=bool,
+            device=self.device,
+        )
+
+    def all(self, dim: int | None = None, keepdim: bool = False) -> "Tensor":
+        return Tensor(
+            np.all(self._array, axis=dim, keepdims=keepdim),
+            dtype=bool,
+            device=self.device,
+        )
+
+    def storage(self):
+        return self._array.reshape(-1)
+
+    def data_ptr(self) -> int:
+        return builtins_int(self._array.__array_interface__["data"][0])
 
     def max(self, dim: int | None = None, keepdim: bool = False):
         if dim is None:
@@ -790,6 +930,27 @@ def manual_seed(seed: int) -> Generator:
     return Generator().manual_seed(seed)
 
 
+def randperm(
+    n: int,
+    *,
+    generator: Generator | None = None,
+    dtype: Any = int64,
+    device: Any = "cpu",
+) -> Tensor:
+    return Tensor(_rng(generator).permutation(builtins_int(n)), dtype=dtype, device=device)
+
+
+def bernoulli(input: Tensor, *, generator: Generator | None = None) -> Tensor:
+    probabilities = np.asarray(input._array, dtype=np.float64)
+    if np.any((probabilities < 0) | (probabilities > 1)):
+        raise RuntimeError("bernoulli probabilities must be in [0, 1]")
+    return Tensor(
+        _rng(generator).binomial(1, probabilities),
+        dtype=input.dtype,
+        device=input.device,
+    )
+
+
 def multinomial(input: Tensor, num_samples: int, replacement: bool = False, *, generator: Generator | None = None) -> Tensor:
     probabilities = np.asarray(input._array, dtype=np.float64)
     if probabilities.ndim not in (1, 2):
@@ -808,7 +969,7 @@ def multinomial(input: Tensor, num_samples: int, replacement: bool = False, *, g
 
 def stack(tensors: Sequence[Tensor], dim: int = 0) -> Tensor:
     tensors = tuple(tensors)
-    requires_grad = _grad_enabled and any(value.requires_grad for value in tensors)
+    requires_grad = _grad_enabled and builtins_any(value.requires_grad for value in tensors)
     result = Tensor(
         np.stack([value._array for value in tensors], axis=dim),
         dtype=tensors[0].dtype,
@@ -829,7 +990,7 @@ def stack(tensors: Sequence[Tensor], dim: int = 0) -> Tensor:
 def cat(tensors: Sequence[Tensor], dim: int = 0) -> Tensor:
     tensors = tuple(tensors)
     axis = dim % tensors[0].ndim
-    requires_grad = _grad_enabled and any(value.requires_grad for value in tensors)
+    requires_grad = _grad_enabled and builtins_any(value.requires_grad for value in tensors)
     result = Tensor(
         np.concatenate([value._array for value in tensors], axis=axis),
         dtype=tensors[0].dtype,
@@ -855,6 +1016,16 @@ def split(input: Tensor, split_size_or_sections: int | Sequence[int], dim: int =
 
 def chunk(input: Tensor, chunks: int, dim: int = 0):
     return input.chunk(chunks, dim=dim)
+
+
+def unbind(input: Tensor, dim: int = 0) -> tuple[Tensor, ...]:
+    axis = dim % input.ndim
+    output = []
+    for index in range(input.shape[axis]):
+        key = [slice(None)] * input.ndim
+        key[axis] = index
+        output.append(input[tuple(key)])
+    return tuple(output)
 
 
 def tril(input: Tensor, diagonal: int = 0) -> Tensor:
@@ -890,8 +1061,59 @@ def abs(input: Tensor) -> Tensor:
     return input.abs()
 
 
+def add(input: Tensor, other: Any, *, alpha: float = 1) -> Tensor:
+    return input + alpha * other
+
+
+def pow(input: Tensor, exponent: Any) -> Tensor:
+    return input**exponent
+
+
+def mean(input: Tensor, dim: int | tuple[int, ...] | None = None, keepdim: bool = False) -> Tensor:
+    return input.mean(dim=dim, keepdim=keepdim)
+
+
+def gather(input: Tensor, dim: int, index: Tensor) -> Tensor:
+    return input.gather(dim, index)
+
+
+def isinf(input: Tensor) -> Tensor:
+    return input.isinf()
+
+
+def isnan(input: Tensor) -> Tensor:
+    return input.isnan()
+
+
 def all(input: Tensor, dim: int | None = None, keepdim: bool = False) -> Tensor:
-    return Tensor(np.all(input._array, axis=dim, keepdims=keepdim), dtype=bool)
+    return input.all(dim=dim, keepdim=keepdim)
+
+
+def any(input: Tensor, dim: int | None = None, keepdim: bool = False) -> Tensor:
+    return input.any(dim=dim, keepdim=keepdim)
+
+
+def topk(
+    input: Tensor,
+    k: int,
+    dim: int = -1,
+    largest: bool = True,
+    sorted: bool = True,
+) -> TopKResult:
+    axis = dim % input.ndim
+    count = builtins_int(k)
+    if count < 0 or count > input.shape[axis]:
+        raise RuntimeError("selected index k out of range")
+    order = np.argsort(input._array, axis=axis, kind="stable")
+    if largest:
+        order = np.flip(order, axis=axis)
+    slices = [slice(None)] * input.ndim
+    slices[axis] = slice(0, count)
+    indices = order[tuple(slices)]
+    if not sorted and count:
+        indices = np.sort(indices, axis=axis)
+    values = input.gather(axis, Tensor(indices, dtype=int64, device=input.device))
+    return TopKResult(values, Tensor(indices, dtype=int64, device=input.device))
 
 
 def allclose(
@@ -934,9 +1156,46 @@ def matmul(left: Tensor, right: Tensor) -> Tensor:
     return left @ right
 
 
+def save(obj: Any, file: Any) -> None:
+    if hasattr(file, "write"):
+        pickle.dump(obj, file)
+        return
+    with open(file, "wb") as handle:
+        pickle.dump(obj, handle)
+
+
+def load(file: Any, map_location: Any = None, **kwargs) -> Any:
+    del map_location, kwargs
+    if hasattr(file, "read"):
+        return pickle.load(file)
+    with open(file, "rb") as handle:
+        return pickle.load(handle)
+
+
+def compile(model=None, *args, **kwargs):
+    del args, kwargs
+    if model is None:
+        return lambda function: function
+    return model
+
+
+_float32_matmul_precision = "highest"
+
+
+def set_float32_matmul_precision(precision: str) -> None:
+    if precision not in {"highest", "high", "medium"}:
+        raise ValueError("precision must be 'highest', 'high', or 'medium'")
+    global _float32_matmul_precision
+    _float32_matmul_precision = precision
+
+
 builtins_int = __builtins__["int"] if isinstance(__builtins__, dict) else __builtins__.int
 builtins_float = __builtins__["float"] if isinstance(__builtins__, dict) else __builtins__.float
 builtins_bool = __builtins__["bool"] if isinstance(__builtins__, dict) else __builtins__.bool
+builtins_any = __builtins__["any"] if isinstance(__builtins__, dict) else __builtins__.any
 
 from . import nn  # noqa: E402  (registered after Tensor is defined)
 from . import optim  # noqa: E402
+from . import amp, backends, cuda, utils  # noqa: E402
+
+autocast = amp.autocast

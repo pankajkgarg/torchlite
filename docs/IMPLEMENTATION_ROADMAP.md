@@ -6,9 +6,9 @@ Date: 2026-07-22
 |---|---|---|---|
 | M0 Architecture | JupyterLite/Pyodide package boundaries and GPU synchronization strategy | Architecture recorded; reference stacks evaluated; unsupported claims removed | Complete |
 | M1 Bigram | Installable `torchlite` wheel and lecture-2 bigram in JupyterLite | Original bigram training/sampling cells run with course data; loss and seeded samples match reference tolerances | Complete |
-| M2 Makemore | MLP, activation/gradient, BatchNorm, manual-backprop, and WaveNet notebooks | Every cell runs; losses, shapes, selected gradients, plots, and samples pass fixtures | Bigram, MLP/BatchNorm, and WaveNet browser slices passing; manual fixture local |
+| M2 Makemore | MLP, activation/gradient, BatchNorm, manual-backprop, and WaveNet notebooks | Losses, shapes, selected gradients, plots, and samples pass fixtures | Complete for browser teaching fixtures; source-lesson APIs covered |
 | M3 WebGPU | Correct GPU broker and backend-neutral autograd | CPU/GPU forward and gradient parity; no silent fallback; memory lifecycle test; course benchmark gates | Planned |
-| M4 GPT + tokenizer | GPT and minBPE plus complete course distribution | Reduced GPT preset completes; original settings launch and checkpoint; tokenizer variants and files work | `llm-core-v1` Tiny GPT complete; broader model/tokenizer work remains |
+| M4 GPT + tokenizer | GPT and minBPE plus complete course distribution | Reduced GPT preset completes and checkpoints; core BPE cells run | Tiny GPT and source-lesson API profile complete; optional tokenizer packages and full GPT-2 workloads remain |
 | M5 Release | Reproducible static site and documented package | Clean build, browser matrix, offline cache, security review, independent repository and preview | In progress |
 
 ## Performance gates

@@ -55,7 +55,10 @@ test.afterAll(async () => {
   if (server) await new Promise(resolve => server.close(resolve));
 });
 
-test.use({ channel: 'chrome' });
+const externalBrowser = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
+test.use(externalBrowser
+  ? { launchOptions: { executablePath: externalBrowser } }
+  : { channel: 'chrome' });
 test.setTimeout(300_000);
 test.describe.configure({ mode: 'serial' });
 
@@ -80,7 +83,7 @@ test('runs the makemore bigram notebook in a Pyodide kernel', async ({ page }) =
 
   const lossOutput = page.getByText(/loss: 3\.7557 -> 2\.58\d{2}/);
   await expect(lossOutput).toBeVisible({ timeout: 240_000 });
-  await expect(page.getByText('torchlite 0.2.0')).toBeVisible();
+  await expect(page.getByText('torchlite 0.3.0')).toBeVisible();
   await expect(page.getByText('228146 training bigrams, 27 classes')).toBeVisible();
 
   const relevantErrors = browserErrors.filter(
@@ -138,6 +141,27 @@ test('trains a decoder-only transformer in a Pyodide kernel', async ({ page }) =
   await expect(page.getByText(/tiny-gpt loss: 2\.4008 -> 1\.29\d{2}; parameters=1112/)).toBeVisible({
     timeout: 240_000,
   });
+
+  const relevantErrors = browserErrors.filter(
+    message => !message.includes('Failed to load resource: the server responded with a status of 404'),
+  );
+  expect(relevantErrors, relevantErrors.join('\n')).toEqual([]);
+});
+
+test('runs source-lesson compatibility APIs in a Pyodide kernel', async ({ page }) => {
+  const browserErrors = [];
+  page.on('pageerror', error => browserErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') browserErrors.push(message.text());
+  });
+
+  await runAllCells(page, '05-source-lesson-compat.ipynb');
+
+  await expect(page.getByText('source-lesson compatibility: ok')).toBeVisible({
+    timeout: 240_000,
+  });
+  await expect(page.getByText('makemore lesson APIs: ok')).toBeVisible();
+  await expect(page.getByText('gpt lesson APIs: ok')).toBeVisible();
 
   const relevantErrors = browserErrors.filter(
     message => !message.includes('Failed to load resource: the server responded with a status of 404'),

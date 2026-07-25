@@ -109,6 +109,17 @@ class Module:
     def eval(self):
         return self.train(False)
 
+    def to(self, target=None, *, dtype=None):
+        for parameter in self.parameters():
+            converted = parameter.to(target, dtype=dtype)
+            parameter._array = converted._array
+            parameter.device = converted.device
+        for buffer in self.buffers():
+            converted = buffer.to(target, dtype=dtype)
+            buffer._array = converted._array
+            buffer.device = converted.device
+        return self
+
     def register_buffer(self, name, tensor, persistent: bool = True):
         del persistent  # all TorchLite buffers are persistent in llm-core-v1
         object.__setattr__(self, name, tensor)
@@ -217,6 +228,16 @@ class GELU(Module):
 
     def forward(self, input):
         return functional.gelu(input, approximate=self.approximate)
+
+
+class ReLU(Module):
+    def __init__(self, inplace: bool = False):
+        super().__init__()
+        if inplace:
+            raise NotImplementedError("TorchLite ReLU does not support inplace=True")
+
+    def forward(self, input):
+        return functional.relu(input)
 
 
 class Tanh(Module):
